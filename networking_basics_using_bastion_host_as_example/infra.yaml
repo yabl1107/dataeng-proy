@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Infraestructura en AWS: EC2 publico (Bastion), EC2 Privado, RDS Postgres y NAT Gateway.'
+
+Parameters:
+  DBPassword:
+    NoEcho: true
+    Description: Password para la base de datos RDS
+    Type: String
+    MinLength: '8'
+  BastionKeyName:
+    Description: Key Pair para el bastion (subnet publica)
+    Type: AWS::EC2::KeyPair::KeyName
+  PrivateKeyName:
+    Description: Key Pair para el Servidor de App (subnet privada)
+    Type: AWS::EC2::KeyPair::KeyName
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64'
+    
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: MyVPC}]
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true # Activar el auto-assign para tener public IP
+      Tags: [{Key: Name, Value: Subnet-Publica}]
+
+  PrivateSubnetApp:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      Tags: [{Key: Name, Value: Subnet-Privada-App}]
+
+  PrivateSubnetDB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ''] # RDS suele pedir subnets en 2 AZs distintos
+      CidrBlock: 10.0.3.0/24
+      Tags: [{Key: Name, Value: Subnet-Privada-DB}]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # NAT Gateway para que subnets privadas tengan solo salida a internet
+  NatEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+
+  #  TABLAS DE RUTAS
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{Key: Name, Value: RT-Publica}]
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{Key: Name, Value: RT-Privada}]
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetAppAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetApp
+
+  # SEGURIDAD 
+  BastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH from world
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: xxx.xxx.xxx.xxx/32 # Aqui usamos nuestra ip
+
+  PrivateSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH from Bastion
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSG 
+
+  PostgresSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Postgres from Bastion/App
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref BastionSG
+
+  # --- 3. INSTANCIAS ---
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref BastionKeyName
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref BastionSG]
+      Tags: [{Key: Name, Value: Bastion-Server}]
+
+  PrivateServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref PrivateKeyName
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref PrivateSubnetApp
+      SecurityGroupIds: [!Ref PrivateSG]
+      Tags: [{Key: Name, Value: Private-App-Server}]
+
+  # Subnet Group para RDS (pide almenos 2 subnets)
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets para RDS
+      SubnetIds: [!Ref PrivateSubnetApp, !Ref PrivateSubnetDB]
+
+  MyDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: postgresdb
+      Engine: postgres
+      EngineVersion: '16'
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      MasterUsername: postgres
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref PostgresSG]
+      PubliclyAccessible: false
