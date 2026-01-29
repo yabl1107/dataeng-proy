@@ -1,0 +1,28 @@
+services:
+  db_1:
+    image: postgres:15
+    container_name: postgres_source
+    environment:
+      POSTGRES_USER: etl_user_source
+      POSTGRES_PASSWORD: password_source
+      POSTGRES_DB: postgres_source_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_1:/var/lib/postgresql/data
+
+  db_2:
+    image: postgres:15
+    container_name: postgres_target
+    environment:
+      POSTGRES_USER: etl_user_target
+      POSTGRES_PASSWORD: password_target
+      POSTGRES_DB: postgres_target_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata_2:/var/lib/postgresql/data
+
+volumes:
+  pgdata_1:
+  pgdata_2:
