@@ -2,7 +2,7 @@
 
 PROJECT_NAME="etl_project"
 
-echo "📁 Creando estructura del proyecto: $PROJECT_NAME"
+echo "Creando estructura del proyecto: $PROJECT_NAME"
 
 # Directorio raíz
 mkdir -p $PROJECT_NAME
@@ -68,6 +68,6 @@ touch $PROJECT_NAME/tests/test_load.py
 mkdir -p $PROJECT_NAME/scripts
 touch $PROJECT_NAME/scripts/run_etl.py
 
-echo "✅ Estructura creada correctamente"
-echo "➡️  cd $PROJECT_NAME"
+echo "Estructura creada correctamente"
+echo "cd $PROJECT_NAME"
 

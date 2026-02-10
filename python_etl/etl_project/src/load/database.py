@@ -6,7 +6,7 @@ from src.utils.db import get_connection
 logger = logging.getLogger(__name__)
 
 INSERT_SQL = """
-INSERT INTO fact_sales_target (
+INSERT INTO dw.fact_sales_target (
     sale_id,
     product_id,
     quantity,
@@ -38,7 +38,6 @@ def load_sales(df: pd.DataFrame):
         conn.commit()
 
     logger.info("Inserción completada correctamente")
-
 
 
 

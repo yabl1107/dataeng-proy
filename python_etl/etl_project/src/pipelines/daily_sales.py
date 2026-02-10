@@ -10,8 +10,9 @@ from src.load.database import load_sales
 logger = logging.getLogger(__name__)
 
 def run():
-    # process_date = date.today()
-    process_date = '2025-03-27'
+    process_date = date.today()
+    
+    #process_date = '2025-03-27'
 
     logger.info(f"Procesando ventas: {process_date}")
 
